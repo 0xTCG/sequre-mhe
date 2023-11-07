@@ -1,30 +1,51 @@
 import time
+
+from numpy.ndarray import ndarray
+
+from sequre.types.utils import contains_type
 from sequre.utils.param import NBIT_F
 from sequre.utils.io import log
 
 
+def _print_difference(result, expected):
+    if (isinstance(result, list) or isinstance(result, ndarray)) and not isinstance(result, list[list[str]]):
+        abs_diff = abs(result - expected)
+        if isinstance(abs_diff, ByVal):
+            print(f"\tAbsolute difference: {abs_diff}")
+        else:
+            print(f"\tMax absolute difference: {abs_diff.flatten().max()}")
+            print(f"\tMean absolute difference: {abs_diff.flatten().mean()}")
+            print(f"\tMin absolute difference: {abs_diff.flatten().min()}")
+    
+    print(f'\nResult: {result.__repr__()}.\n\nExpected: {expected.__repr__()}')
+
+
+def _assert(name, check_op, result, expected, silent_pass):
+    if check_op(result, expected):
+        if not silent_pass:
+            print(f'{name} passed.')
+    else:
+        print(f'{name} failed!')
+        _print_difference(result, expected)
+        raise ValueError(f'{name} failed!')
+
+
 def assert_eq(name, result, expected, silent_pass = False):
-    assert (result == expected).all(), f'{name} failed! Result: {result.__repr__()}.\n\nExpected: {expected.__repr__()}'
-    if not silent_pass: print(f'{name} passed.')
+    _assert(name, lambda r, e: (r == e).all(), result, expected, silent_pass)
 
 
 def assert_geq(name, result, expected, silent_pass = False):
-    assert (result >= expected).all(), f'{name} failed! Result: {result.__repr__()}.\n\nExpected to be greater than: {expected.__repr__()}'
-    if not silent_pass: print(f'{name} passed.')
+    _assert(name, lambda r, e: (r >= e).all(), result, expected, silent_pass)
 
 
 def assert_leq(name, result, expected, silent_pass = False):
-    assert (result <= expected).all(), f'{name} failed! Result: {result.__repr__()}.\n\nExpected to be greater than: {expected.__repr__()}'
-    if not silent_pass: print(f'{name} passed.')
+    _assert(name, lambda r, e: (r <= e).all(), result, expected, silent_pass)
 
 
 def assert_eq_approx(name, result, expected, error: float = 0.018, silent_pass = False):
     # Scale error with the fractional size precision
     error += 1.0 / (2 ** NBIT_F)
-    
-    check: bool = ((expected - error) < result).all() and (result < (expected + error)).all()
-    assert check, f'{name} failed! Result: {result.__repr__()}.\n\nExpected: {expected.__repr__()}'
-    if not silent_pass: print(f'{name} passed.')
+    _assert(name, lambda r, e: ((e - error) < r).all() and (r < (e + error)).all(), result, expected, silent_pass)
 
 
 def time_frame(mpc, func, name, modulus, *args):

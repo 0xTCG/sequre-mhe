@@ -6,6 +6,8 @@ from sequre.attributes import sequre
 from sequre.stdlib.lin_alg import orthonormalize, eigen_decomp, householder
 from sequre.utils.utils import random_ints
 
+from .....tests.utils import assert_eq_approx
+
 
 class RandomSketching:
     @sequre
@@ -100,28 +102,77 @@ def random_pca_without_norm(mpc, data, data_mean, top_components_count, oversamp
     return Z.via_mpc(lambda stensor: eigen_decomp(mpc, stensor)[0][:top_components_count, :sketch_size])
 
 
-@sequre
 def dqr_experimental(mpc, v_mpp, cp_1_size):
+    return v_mpp
+
+
+from sequre.types.internal import Internal as sq
+@sequre
+def householder_2(mpc, x, x_raw):
+    xdot = sq.dot(mpc, x, axis=0)
+    xdot_raw = sq.dot(mpc, x_raw, axis=0)
+    if mpc.pid: assert_eq_approx(f"xdot", xdot.reveal(), xdot_raw)
+    
+    shift = sq.sqrt(mpc, xdot) * ((x[0] > 0).astype(float) * 2 - 1)
+    shift_raw = sq.sqrt(mpc, xdot_raw) * ((x_raw[0] > 0).astype(float) * 2 - 1)
+    if mpc.pid: assert_eq_approx(f"shift", shift.reveal(), shift_raw)
+
+    v = x.copy()
+    v_raw = x_raw.copy()
+    
+    v[0] += shift
+    v_raw[0] += shift_raw
+    if mpc.pid: assert_eq_approx(f"hh v", v.reveal(), v_raw)
+
+    _t = (xdot + x[0] * shift) * 2
+    _t_raw = (xdot_raw + x_raw[0] * shift_raw) * 2
+    if mpc.pid: assert_eq_approx(f"hh _t", _t.reveal(), _t_raw)
+
+    r = v / sq.sqrt(mpc, _t)
+    r_raw = v_raw / sq.sqrt(mpc, _t_raw)
+    if mpc.pid: assert_eq_approx(f"hh r", r.reveal(), r_raw)
+
+    return r.expand_dims(), r_raw.expand_dims()
+
+
+@sequre
+def dqr_experimental_2(mpc, v_mpp, v_mpp_raw, cp_1_size):
     """
     Algorithm 3 from https://arxiv.org/abs/2304.00129
     """
     rho, _ = v_mpp.shape
     v_cache = []
+    v_cache_raw = []
 
     for i in range(rho):
-        v = householder(mpc, v_mpp[0]).expand_dims()  # 1 x n
+        v, v_raw = householder_2(mpc, v_mpp[0], v_mpp_raw[0])
+        if mpc.pid: assert_eq_approx(f"v", v.reveal(), v_raw)
+
         v_cache.append(v)
+        v_cache_raw.append(v_raw)
+
         v_mpp -= v_mpp @ v.T @ v * 2  # rho x n
+        v_mpp_raw -= v_mpp_raw @ v_raw.T @ v_raw * 2  # rho x n
+        if mpc.pid: assert_eq_approx(f"v_mpp", v_mpp.reveal(), v_mpp_raw)
 
         v_mpp = v_mpp.slice_local(rho - i - 1, cp_1_size)  # TODO: Figure out a better way to do this step
+        v_mpp_raw = v_mpp_raw.slice_local(rho - i - 1, cp_1_size)  # TODO: Figure out a better way to do this step
+        if mpc.pid: assert_eq_approx(f"v_mpp 2", v_mpp.reveal(), v_mpp_raw)
     
     q_mpp = v_mpp.I.encrypt()  # TODO: Remove .encrypt and debug downstream to drastically improve performance
+    q_mpp_raw = v_mpp_raw.I
+    if mpc.pid: assert_eq_approx(f"q_mpp", q_mpp.reveal(), q_mpp_raw)
 
     for i in range(rho - 1, -1, -1):
         v = v_cache[i].rotate_local(-i, cp_1_size)
+        v_raw = v_cache_raw[i].rotate_local(-i, cp_1_size)
+        if mpc.pid: assert_eq_approx(f"v 2 {i}", v.reveal(), v_raw)
+        
         q_mpp -= q_mpp @ v.T @ v
+        q_mpp_raw -= q_mpp_raw @ v_raw.T @ v_raw
+        if mpc.pid: assert_eq_approx(f"q_mpp 2 {i}", q_mpp.reveal(), q_mpp_raw)
     
-    return q_mpp
+    return q_mpp, q_mpp_raw
 
 
 @sequre
@@ -132,24 +183,49 @@ def random_pca_experimental(mpc, data_mpp, top_components_count, oversampling_co
     # Steps 1 and 2 are skipped: local data is mean centered
     rho = top_components_count + oversampling_count
     
+    data_mpp = data_mpp / 32
+
     # Step 3:
     pi_public = RandomSketching.generate_sketch_matrix((rho, len(data_mpp)))  # rho x n
+    data_mpp_raw = data_mpp.reveal()
+
     p_mpa = pi_public @ data_mpp  # rho x m
+    p_mpa_raw = pi_public @ data_mpp_raw
+    if mpc.pid: assert_eq_approx(f"p_mpa", p_mpa.reveal(), p_mpa_raw)
 
     # Step 4 (Seq):
     for _ in range(power_iterations_count):
         print(f"CP{mpc.pid}:\tPCA powers iteration {_ + 1}/{power_iterations_count} ...")
         # DQR:
-        r_mpp = dqr_experimental(mpc, p_mpa @ data_mpp.T, cp_1_size)  # rho x n
+        r_mpp, r_mpp_raw = dqr_experimental_2(mpc, p_mpa @ data_mpp.T, p_mpa_raw @ data_mpp_raw.T, cp_1_size)  # rho x n
+        if mpc.pid: assert_eq_approx(f"r_mpp {_}", r_mpp.reveal(), r_mpp_raw)
+        
         p_mpa = r_mpp @ data_mpp  # rho x m
+        p_mpa_raw = r_mpp_raw @ data_mpp_raw  # rho x m
+        if mpc.pid: assert_eq_approx(f"p_mpa {_}", p_mpa.reveal(), p_mpa_raw)
     
     # Step 5 (Seq):
     z_mpp = p_mpa @ data_mpp.T  # rho x n
-    z_cov_mpa = z_mpp @ z_mpp.T  # / data_mpp.shape[1]  # rho x rho
+    z_mpp_raw = p_mpa_raw @ data_mpp_raw.T  # rho x n
+    if mpc.pid: assert_eq_approx(f"z_mpp", z_mpp.reveal(), z_mpp_raw)
+    
+    z_cov_mpa = z_mpp @ z_mpp.T # rho x rho
+    z_cov_mpa_raw = z_mpp_raw @ z_mpp_raw.T # rho x rho
+    if mpc.pid: assert_eq_approx(f"z_cov_mpa", z_cov_mpa.reveal(), z_cov_mpa_raw)
     
     # Step 6
     u_mpa = z_cov_mpa.via_mpc(
         lambda stensor: eigen_decomp(mpc, stensor)[0][:top_components_count])  # top_components_count x rho
+    u_mpa_raw = z_cov_mpa_raw.via_mpc(
+        lambda stensor: eigen_decomp(mpc, stensor)[0][:top_components_count])  # top_components_count x rho
+    if mpc.pid: assert_eq_approx(f"u_mpa", u_mpa.reveal(), u_mpa_raw)
 
     # Step 7
-    return u_mpa @ z_mpp  # top_components_count x n
+    r = u_mpa @ z_mpp  # top_components_count x n
+    r_raw = u_mpa_raw @ z_mpp_raw  # top_components_count x n
+    if mpc.pid: assert_eq_approx(f"r", r.reveal(), r_raw)
+
+    from sequre.utils.io import log
+    log("PCA", r_raw.tolist())
+
+    return r

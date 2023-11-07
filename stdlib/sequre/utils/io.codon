@@ -68,14 +68,20 @@ def reset_files(*files):
 
 
 def log(name, data, path='log.txt', mode='a+', separator='\t'):
-    with open(path, mode) as f:
-        f.write(f'{name}\n')
-        if isinstance(data, list[list]):
-            for row in data:
-                f.write(separator.join([str(e) for e in row]))
+    def _log(data):
+        with open(path, mode) as f:
+            f.write(f'{name}\n')
+            if isinstance(data, list[list]):
+                for row in data:
+                    f.write(separator.join([str(e) for e in row]))
+                    f.write('\n')
+            elif isinstance(data, list):
+                f.write(separator.join([str(e) for e in data]))
                 f.write('\n')
-        elif isinstance(data, list):
-            f.write(separator.join([str(e) for e in data]))
-            f.write('\n')
-        else:
-            f.write(f'{data}\n')
+            else:
+                f.write(f'{data}\n')
+    
+    if isinstance(data, ndarray):
+        _log(data.tolist())
+    else:
+        _log(data)

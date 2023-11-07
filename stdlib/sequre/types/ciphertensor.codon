@@ -758,7 +758,7 @@ class Ciphertensor[ctype]:
         """
         assert mpc.pid, "Not implemented yet: patch_copy at CP0"
         assert 0 < self.ndim < 3, "Ciphertensor: patch-copying can be applied only to 1-dim and 2-dim tensors"
-        assert self.shape[-1] < new_size, "Ciphertensor: can only patch_copy to larger array. Use Ciphertensor.resize() for trimming"
+        assert self.shape[-1] < new_size, f"Ciphertensor: can only patch_copy to larger array. Use Ciphertensor.resize() for trimming. Shape: {self.shape}. New size: {new_size}."
 
         if isinstance(ctype, Plaintext):
             # TODO: Read dtype (T) from self (add dtype static to Ciphertensor class)

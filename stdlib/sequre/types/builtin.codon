@@ -326,7 +326,7 @@ class UInt:
         return self * UInt[N](other)
     def __sub__(self: UInt[N], other: int) -> UInt[N]:
         return self - UInt[N](other)
-    def __truediv__(self: UInt[N], other: int) -> UInt[N]:
+    def __truediv__(self: UInt[N], other: int) -> float:
         return self / UInt[N](other)
     def __floordiv__(self: UInt[N], other: int) -> UInt[N]:
         return self // UInt[N](other)
@@ -774,6 +774,11 @@ class List:
             for j in range(start_col, stop_col):
                 self[i][j] = other
 
+    def __abs__(self: list[T]) -> list[T]:
+        l = list[T](len(self))
+        for s in self: l.append(abs(s))
+        return l
+    
     def __neg__(self: list[T]) -> list[T]:
         l = list[T](len(self))
         for s in self: l.append(-s)
@@ -1237,8 +1242,9 @@ class List:
             for s in self:
                 l.append(s.mul_mod(other, modulus))
         elif isinstance(other, list):
-            if len(other) == 1 and self.ndim == 2:
-                assert self.shape[1] == other.shape[1], f"List: cannot broadcast {other.shape} to {self.shape} for add"
+            if len(other) == 1:
+                if self.ndim == 2:
+                    assert self.shape[1] == other.shape[1], f"List: cannot broadcast {other.shape} to {self.shape} for add"
                 o = other[0]
                 for i in range(len(self)):
                     l.append(self[i].mul_mod(o, modulus))
@@ -1693,6 +1699,12 @@ class List:
     
     def mean(self: list[T]):
         return self.sum() / len(self)
+    
+    def min(self: list[T]):
+        return min(self.flatten())
+    
+    def max(self: list[T]):
+        return max(self.flatten())
     
     def reduce_and(self: list[T]) -> T:
         if not self: return T.zeros()

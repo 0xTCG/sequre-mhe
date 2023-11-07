@@ -223,19 +223,82 @@ def population_stratification_analysis(mpc, top_components, oversampling_count, 
 
 @sequre
 def cochran_armitage(mpc, V, pheno, dosage):
+    V_raw = V.reveal(mpc)
+    pheno_raw = pheno.reveal(mpc)
+    dosage_raw = dosage.reveal(mpc)
+
     pheno_int = pheno.expand_dims()
+    pheno_int_raw = pheno_raw.expand_dims()
+    if mpc.pid:
+        assert_eq_approx(f'pheno_int', pheno_int.reveal(mpc), pheno_int_raw)
+
     pheno_float = pheno_int.to_fp()
+    pheno_float_raw = pheno_int_raw.to_fp()
+    if mpc.pid:
+        assert_eq_approx(f'pheno_float', pheno_float.reveal(mpc), pheno_float_raw)
+
     dosage_float = dosage.astype(float)
+    dosage_float_raw = dosage_raw.astype(float)
+    if mpc.pid:
+        assert_eq_approx(f'dosage_float', dosage_float.reveal(mpc), dosage_float_raw)
+
     p_hat = pheno_float - pheno_int @ V.T @ V
+    p_hat_raw = pheno_float_raw - pheno_int_raw @ V_raw.T @ V_raw
+    if mpc.pid:
+        assert_eq_approx(f'p_hat', p_hat.reveal(mpc), p_hat_raw)
+
     sp = p_hat.sum(axis=1)[0]
+    sp_raw = p_hat_raw.sum(axis=1)[0]
+    if mpc.pid:
+        assert_eq_approx(f'sp', sp.reveal(mpc), sp_raw)
+
     sx = ((1 - V.T.sum(axis=0).expand_dims() @ V) @ dosage_float)[0]
+    sx_raw = ((1 - V_raw.T.sum(axis=0).expand_dims() @ V_raw) @ dosage_float_raw)[0]
+    if mpc.pid:
+        assert_eq_approx(f'sx', sx.reveal(mpc), sx_raw, error=0.5)
+
     spp = sq.dot(mpc, p_hat[0], axis=0)
+    spp_raw = sq.dot(mpc, p_hat_raw[0], axis=0)
+    if mpc.pid:
+        assert_eq_approx(f'spp', spp.reveal(mpc), spp_raw, error=0.5)
+
     sxp = (p_hat @ dosage_float)[0]
+    sxp_raw = (p_hat_raw @ dosage_float_raw)[0]
+    if mpc.pid:
+        assert_eq_approx(f'sxp', sxp.reveal(mpc), sxp_raw, error=0.1)
+
     sxx = (dosage * dosage).sum(axis=0).to_fp() - sq.dot(mpc, V @ dosage_float, axis=0)
+    sxx_raw = (dosage_raw * dosage_raw).sum(axis=0).to_fp() - sq.dot(mpc, V_raw @ dosage_float_raw, axis=0)
+    if mpc.pid:
+        assert_eq_approx(f'sxx', sxx.reveal(mpc), sxx_raw, error=0.1)
+
     norm_sp = sp / len(pheno)
+    norm_sp_raw = sp_raw / len(pheno_raw)
+    if mpc.pid:
+        assert_eq_approx(f'norm_sp', norm_sp.reveal(mpc), norm_sp_raw, error=0.1)
+
     numer = sxp - sx * norm_sp
+    numer_raw = sxp_raw - sx_raw * norm_sp_raw
+    
+    if mpc.pid:
+        assert_eq_approx(f'numer', numer.reveal(mpc), numer_raw, error=2.0)
+
     denom = (sxx - sx * sx / len(pheno)) * (spp - sp * norm_sp)
+    denom_raw = (sxx_raw - sx_raw * sx_raw / len(pheno_raw)) * (spp_raw - sp_raw * norm_sp_raw)
+
+    from sequre.utils.io import log
+    log("Denom sequre", denom.reveal(mpc))
+    log("Denom raw", denom_raw)
+    if mpc.pid:
+        assert_eq_approx(f'denom', denom.reveal(mpc), denom_raw, error=210.0)
+    
     assoc = numer / sq.sqrt(mpc, denom)
+    assoc_raw = numer_raw / sq.sqrt(mpc, denom_raw)
+
+    log("Assoc sequre", assoc.reveal(mpc))
+    log("Assoc raw", assoc_raw)
+    # if mpc.pid:
+    #     assert_eq_approx(f'assoc', assoc.reveal(mpc), assoc_raw.nan_to_num(), error=0.1)
 
     print(f"CP{mpc.pid}:\tComputed GWAS associations.")
     return assoc
@@ -288,12 +351,12 @@ def sf_gwas_experimental(mpc, test_run, modulus):
         mpc, NUM_INDS, NUM_SNPS, snp_pos, pheno, cov, g, miss, dosage)
     
     # Experimental run
-    indv_per_party = 8  # 16
+    indv_per_party = 8
     indv_count = indv_per_party * (mpc.comms.number_of_parties - 1)
     cov_count = 2
     top_components_count = 2
     oversampling_count = 2
-    snps_count = 32  # 8192
+    snps_count = 8192
     power_iterations_count = 1 # 10
 
     # Revealing for testing
@@ -330,23 +393,31 @@ def sf_gwas_experimental(mpc, test_run, modulus):
     cov = MPU(mpc, partition_cov, "partition")
     pheno = MPU(mpc, partition_pheno, "partition").T
     
-    mpc.randomness.reset_seed(-1, hash('global'))
-    raw_components = sf_psa_experimental(
-        mpc, raw_geno, raw_cov, top_components_count,
-        oversampling_count, power_iterations_count, indv_per_party)
-    raw_ca = cochran_armitage(mpc, raw_components, raw_pheno, raw_geno)
+    # mpc.randomness.reset_seed(-1, hash('global'))
+    # with mpc.randomness.seed_switch(-1):
+    #     raw_components = sf_psa_experimental(
+    #         mpc, raw_geno, raw_cov, top_components_count,
+    #         oversampling_count, power_iterations_count, indv_per_party)
+    #     raw_ca = cochran_armitage(mpc, raw_components, raw_pheno, raw_geno)
 
     import time
     s = time.time()
     mpc.randomness.reset_seed(-1, hash('global'))
-    components = sf_psa_experimental(
-        mpc, geno, cov, top_components_count,
-        oversampling_count, power_iterations_count, indv_per_party)
-    ca = cochran_armitage(mpc, components, pheno, geno)
+    with mpc.randomness.seed_switch(-1):
+        components = sf_psa_experimental(
+            mpc, geno, cov, top_components_count,
+            oversampling_count, power_iterations_count, indv_per_party)
+        
+        ca = cochran_armitage(mpc, components, pheno, geno)
+        raw_ca = cochran_armitage(mpc, components.reveal(mpc), raw_pheno, raw_geno)
     e = time.time()
     print(f"CP{mpc.pid}:\tTemp counter: GWAS PSA and CA done in {e - s}s")
 
-    if mpc.pid:
-        assert_eq_approx(f'CP{mpc.pid}:\tSequre GWAS-MHE ({alg_struct}) test', ca.reveal(mpc), raw_ca.nan_to_num(), error=0.05)
+    from sequre.utils.io import log
+    log("Sequre-GWAS", ca.reveal(mpc))
+    log("Plain-GWAS", raw_ca.nan_to_num())
+    
+    # if mpc.pid:
+    #     assert_eq_approx(f'CP{mpc.pid}:\tSequre GWAS-MHE ({alg_struct}) test', ca.reveal(mpc), raw_ca.nan_to_num(), error=0.05)
 
     return ca

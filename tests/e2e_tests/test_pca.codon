@@ -44,13 +44,15 @@ def test_pca[TP](mpc: MPCEnv[TP], modulus: TP):
         assert_eq_approx(f"CP{mpc.pid}:\tSafe-checking PCA data loading (MPU) on {alg_struct}", mpu_data.reveal(mpc), raw_data)
 
     mpc.randomness.reset_seed(-1, hash('global'))
-    classic_pca_u, classic_pca_z = random_pca_with_norm(
-        mpc, raw_data, raw_miss, raw_data_mean, raw_data_std_inv,
-        top_components_count, oversampling_count, power_iterations_count, filtered_data_size)
+    with mpc.randomness.seed_switch(-1):
+        classic_pca_u, classic_pca_z = random_pca_with_norm(
+            mpc, raw_data, raw_miss, raw_data_mean, raw_data_std_inv,
+            top_components_count, oversampling_count, power_iterations_count, filtered_data_size)
     mpc.randomness.reset_seed(-1, hash('global'))
-    mpc_pca_u, mpc_pca_z = random_pca_with_norm(
-        mpc, mpc_data, mpc_miss, mpc_data_mean, mpc_data_std_inv,
-        top_components_count, oversampling_count, power_iterations_count, filtered_data_size)
+    with mpc.randomness.seed_switch(-1):
+        mpc_pca_u, mpc_pca_z = random_pca_with_norm(
+            mpc, mpc_data, mpc_miss, mpc_data_mean, mpc_data_std_inv,
+            top_components_count, oversampling_count, power_iterations_count, filtered_data_size)
 
     if mpc.pid == 0:
         assert_eq(f"CP{mpc.pid}:\tSafe-checking std PCA U result shape (MPC) on {alg_struct}", mpc_pca_u.shape, list(classic_pca_u.shape))
@@ -60,18 +62,20 @@ def test_pca[TP](mpc: MPCEnv[TP], modulus: TP):
         assert_eq_approx(f"CP{mpc.pid}:\tSequre std PCA Z (MPC) on {alg_struct}", mpc_pca_z.reveal(mpc), classic_pca_z)
         
     mpc.randomness.reset_seed(-1, hash('global'))
-    classic_pca_non_std = random_pca_experimental(
-        mpc, raw_data, top_components_count,
-        oversampling_count, power_iterations_count, rows_per_party)
+    with mpc.randomness.seed_switch(-1):
+        classic_pca_non_std = random_pca_experimental(
+            mpc, raw_data, top_components_count,
+            oversampling_count, power_iterations_count, rows_per_party)
     mpc.randomness.reset_seed(-1, hash('global'))
-    mpu_pca_non_std = random_pca_experimental(
-        mpc, mpu_data, top_components_count,
-        oversampling_count, power_iterations_count, rows_per_party)
+    with mpc.randomness.seed_switch(-1):
+        mpu_pca_non_std = random_pca_experimental(
+            mpc, mpu_data, top_components_count,
+            oversampling_count, power_iterations_count, rows_per_party)
     
     if mpc.pid == 0:
         assert_eq(f"CP{mpc.pid}:\tSafe-checking non-std PCA result shape (MPU) on {alg_struct}", mpu_pca_non_std.shape, classic_pca_non_std.shape)
     else:
-        assert_eq_approx(f"CP{mpc.pid}:\tSequre non-std PCA (MPU) on {alg_struct}", mpu_pca_non_std.reveal(mpc), classic_pca_non_std, error=1.0)  # Remove error check after Lattiseq.add bug is fixed and eigendecomp edge-case is fixed (issue #262)
+        assert_eq_approx(f"CP{mpc.pid}:\tSequre non-std PCA (MPU) on {alg_struct}", mpu_pca_non_std.reveal(mpc), classic_pca_non_std, error=0.2)
 
     print(f'CP{mpc.pid}:\tSequre PCA on {"ring" if modulus.popcnt() == 1 else "field"} tests passed.\n')
     
